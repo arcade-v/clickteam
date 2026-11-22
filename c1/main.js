@@ -1,16 +1,5 @@
 const runtimecanvas = "resources/fnac1.cch";
 const parts = 7;
-
-const cdnBases = [
-    "https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-    "https://fastly.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-    "https://testingcf.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-    "https://gcore.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-    "https://raw.githack.com/arcade-v/clickteam/main/c1/",
-    "https://raw.githubusercontent.com/arcade-v/clickteam/main/c1/",
-    "https://cdn.statically.io/gh/arcade-v/clickteam/c1/"
-];
-
 const map = new Map();
 const blobUrls = [];
 

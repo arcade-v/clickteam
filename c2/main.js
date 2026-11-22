@@ -1,4 +1,3 @@
-
 (() => {
     const runtimecanvas = "resources/fnac2.cch";
     const parts = 12;

@@ -1,15 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <base href="https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c2/">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap"
+    rel="stylesheet"
+  >
+    <base href="https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c1/">
 
     <meta charset="UTF-8">
-    <meta name="viewport" content="initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="HandheldFriendly" content="true">
 
-    <title>Five Nights at Candy's 2</title>
+    <title>Five Nights at Candy's 1</title>
 
     <link id="game-style" rel="stylesheet" href="style.css">
     <link id="game-icon" rel="icon" type="image/x-icon" href="favicon.ico">
@@ -103,109 +107,77 @@
     </div>
 
     <div id="loading-error"></div>
-<script>
-(() => {
-    const bases = [
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script>
         const cdnBases = [
-            "https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-            "https://fastly.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-            "https://testingcf.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-            "https://gcore.jsdelivr.net/gh/arcade-v/clickteam/c1/",
-            "https://raw.githack.com/arcade-v/clickteam/main/c1/",
-            "https://raw.githubusercontent.com/arcade-v/clickteam/main/c1/",
-            "https://cdn.statically.io/gh/arcade-v/clickteam/c1/",
-    ];
+            "https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c2/",
+            "https://fastly.jsdelivr.net/gh/arcade-v/clickteam/c2/",
+            "https://testingcf.jsdelivr.net/gh/arcade-v/clickteam/c2/",
+            "https://gcore.jsdelivr.net/gh/arcade-v/clickteam/c2/",
+            "https://raw.githack.com/arcade-v/clickteam/main/c2/",
+            "https://raw.githubusercontent.com/arcade-v/clickteam/main/c2/",
+            "https://cdn.statically.io/gh/arcade-v/clickteam/c2/"
+        ];
 
-    function showError(message) {
-        const error = document.getElementById("loading-error");
-        error.textContent = message;
-        error.style.display = "block";
-        console.error(message);
-    }
+        function loadFallbackAsset(elementId, path, attribute) {
+            const element = document.getElementById(elementId);
+            let index = 0;
 
-    // Load CSS and favicon with CDN fallbacks.
-    function loadAsset(id, filename, attribute) {
-        const element = document.getElementById(id);
-        if (!element) return;
+            element.onerror = function () {
+                index++;
 
-        let index = 0;
+                if (index >= cdnBases.length) {
+                    console.error("Could not load:", path);
+                    return;
+                }
 
-        function attempt() {
-            if (index >= bases.length) {
-                console.warn("Could not load asset:", filename);
+                element[attribute] = cdnBases[index] + path;
+            };
+
+            element[attribute] = cdnBases[0] + path;
+        }
+
+        loadFallbackAsset("game-style", "style.css", "href");
+        loadFallbackAsset("game-icon", "favicon.ico", "href");
+
+        function loadMainScript(index = 0) {
+            if (index >= cdnBases.length) {
+                showLoadingError("Could not load main.js from any CDN.");
                 return;
             }
 
-            const url = bases[index++] + filename;
+            const script = document.createElement("script");
+            script.src = cdnBases[index] + "main.js";
 
-            if (attribute === "href") {
-                element.href = url;
-            }
+            script.onerror = function () {
+                script.remove();
+                loadMainScript(index + 1);
+            };
 
-            element.onerror = attempt;
+            document.body.appendChild(script);
         }
 
-        attempt();
-    }
-
-    // Load main.js with CDN fallbacks.
-    function loadMainScript(index = 0) {
-        if (index >= bases.length) {
-            showError("Could not load main.js from any CDN. Check that the file exists.");
-            return;
+        function showLoadingError(message) {
+            const error = document.getElementById("loading-error");
+            error.textContent = message;
+            error.style.display = "block";
         }
 
-        const script = document.createElement("script");
-        script.src = bases[index] + "main.js";
-
-        console.log("Attempting to load:", script.src);
-
-        script.onload = () => {
-            console.log("Successfully loaded:", script.src);
-        };
-
-        script.onerror = () => {
-            console.warn("Failed to load:", script.src);
-            script.remove();
-            loadMainScript(index + 1);
-        };
-
-        document.body.appendChild(script);
-    }
-
-    // Load JSZip before main.js.
-    function loadJSZip(index = 0) {
-        const sources = [
-            "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
-            "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
-        ];
-
-        if (index >= sources.length) {
-            showError("Could not load JSZip. Resource extraction cannot continue.");
-            return;
-        }
-
-        const script = document.createElement("script");
-        script.src = sources[index];
-
-        script.onload = () => {
-            console.log("JSZip loaded:", script.src);
+        if (window.JSZip) {
             loadMainScript();
-        };
+        } else {
+            const zipScript = document.createElement("script");
+            zipScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
 
-        script.onerror = () => {
-            console.warn("JSZip failed:", script.src);
-            script.remove();
-            loadJSZip(index + 1);
-        };
+            zipScript.onload = loadMainScript;
+            zipScript.onerror = function () {
+                showLoadingError("Could not load JSZip.");
+            };
 
-        document.body.appendChild(script);
-    }
-
-    loadAsset("game-style", "style.css", "href");
-    loadAsset("game-icon", "favicon.ico", "href");
-    loadJSZip();
-})();
-</script>
+            document.head.appendChild(zipScript);
+        }
+    </script>
 </body>
 </html>

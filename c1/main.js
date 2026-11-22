@@ -1,157 +1,297 @@
 const runtimecanvas = "resources/fnac1.cch";
 const parts = 7;
 
-// -----------------
+const cdnBases = [
+    "https://cdn.jsdelivr.net/gh/arcade-v/clickteam/c1/",
+    "https://fastly.jsdelivr.net/gh/arcade-v/clickteam/c1/",
+    "https://testingcf.jsdelivr.net/gh/arcade-v/clickteam/c1/",
+    "https://gcore.jsdelivr.net/gh/arcade-v/clickteam/c1/",
+    "https://raw.githack.com/arcade-v/clickteam/main/c1/",
+    "https://raw.githubusercontent.com/arcade-v/clickteam/main/c1/",
+    "https://cdn.statically.io/gh/arcade-v/clickteam/c1/"
+];
+
 const map = new Map();
+const blobUrls = [];
+
+const originalFetch = window.fetch.bind(window);
 
 function updateProgress(id, percent) {
-    document.getElementById(id + '-bar').style.width = percent + '%';
-    document.getElementById(id + '-text').innerText = percent + '%';
+    percent = Math.max(0, Math.min(100, Math.floor(percent)));
+
+    const bar = document.getElementById(id + "-bar");
+    const text = document.getElementById(id + "-text");
+
+    if (bar) bar.style.width = percent + "%";
+    if (text) text.innerText = percent + "%";
+}
+
+function showError(error) {
+    console.error(error);
+
+    const container = document.getElementById("loading-error");
+    if (container) {
+        container.textContent =
+            "Game loading failed: " +
+            (error?.message || String(error));
+
+        container.style.display = "block";
+    }
+}
+
+function makeBlobUrl(blob) {
+    const url = URL.createObjectURL(blob);
+    blobUrls.push(url);
+    return url;
+}
+
+async function fetchWithFallback(path, options = {}) {
+    let lastError;
+
+    for (const base of cdnBases) {
+        const url = base + path;
+
+        try {
+            const response = await originalFetch(url, options);
+
+            if (!response.ok) {
+                throw new Error(
+                    `HTTP ${response.status}: ${url}`
+                );
+            }
+
+            return response;
+        } catch (error) {
+            lastError = error;
+            console.warn("CDN failed:", url, error);
+        }
+    }
+
+    throw lastError || new Error("All CDN sources failed: " + path);
+}
+
+function getMappedResource(url) {
+    if (typeof url !== "string") return null;
+
+    let path = url;
+
+    try {
+        path = new URL(url, document.baseURI).pathname;
+    } catch (_) {}
+
+    path = decodeURIComponent(path);
+
+    const relativePath = path.split("/resources/").pop();
+    const normalizedPath = relativePath || path.replace(/^.*\/resources\//, "");
+
+    if (map.has(normalizedPath)) {
+        return map.get(normalizedPath);
+    }
+
+    const fileName = normalizedPath.split("/").pop();
+
+    if (map.has(fileName)) {
+        return map.get(fileName);
+    }
+
+    return null;
 }
 
 async function intercept() {
-  const ogfetch = window.fetch;
-  window.fetch = async function (input, init) {
-    if (typeof input === 'string' && input.startsWith('resources/')) {
-      const fileName = input.split('/').pop();
-      if (map.has(fileName)) {
-        return ogfetch(map.get(fileName), init);
-      }
-    }
-    return ogfetch(input, init);
-  };
+    // Fetch interception
+    window.fetch = async function (input, init) {
+        const inputUrl =
+            typeof input === "string" ? input :
+            input instanceof Request ? input.url : "";
 
-  const ogopen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (method, url) {
-    if (url.startsWith('resources/')) {
-      const fileName = url.split('/').pop();
-      if (map.has(fileName)) {
-        url = map.get(fileName);
-      }
-    }
-    return ogopen.apply(this, arguments);
-  };
+        const mapped = getMappedResource(inputUrl);
 
-  const types = [HTMLImageElement, HTMLAudioElement, HTMLVideoElement];
-  for (const Tag of types) {
-    const descriptor = Object.getOwnPropertyDescriptor(Tag.prototype, 'src');
-    if (descriptor && descriptor.set) {
-      Object.defineProperty(Tag.prototype, 'src', {
-        configurable: true,
-        enumerable: true,
-        get: descriptor.get,
-        set: function (val) {
-          if (typeof val === 'string' && val.startsWith('resources/')) {
-            const fileName = val.split('/').pop();
-            if (map.has(fileName)) {
-              val = map.get(fileName);
-            }
-          }
-          descriptor.set.call(this, val);
+        if (mapped) {
+            return originalFetch(mapped, init);
         }
-      });
+
+        // The original ZIP is served from the merged Blob.
+        if (
+            typeof inputUrl === "string" &&
+            inputUrl.endsWith("resources.zip") &&
+            window.mergedResourcesUrl
+        ) {
+            return originalFetch(window.mergedResourcesUrl, init);
+        }
+
+        return originalFetch(input, init);
+    };
+
+    // XMLHttpRequest interception
+    const originalOpen = XMLHttpRequest.prototype.open;
+
+    XMLHttpRequest.prototype.open = function (method, url, ...args) {
+        const mapped = getMappedResource(url);
+
+        if (mapped) {
+            url = mapped;
+        }
+
+        return originalOpen.call(this, method, url, ...args);
+    };
+
+    // Image, audio, and video interception
+    const mediaTypes = [
+        HTMLImageElement,
+        HTMLAudioElement,
+        HTMLVideoElement
+    ];
+
+    for (const Tag of mediaTypes) {
+        const descriptor =
+            Object.getOwnPropertyDescriptor(Tag.prototype, "src");
+
+        if (!descriptor || !descriptor.set) continue;
+
+        Object.defineProperty(Tag.prototype, "src", {
+            configurable: true,
+            enumerable: descriptor.enumerable,
+
+            get: descriptor.get,
+
+            set: function (value) {
+                const mapped = getMappedResource(value);
+
+                if (mapped) {
+                    value = mapped;
+                }
+
+                descriptor.set.call(this, value);
+            }
+        });
     }
-  }
+}
+
+async function downloadPart(partNumber) {
+    const path = `resources.zip.part${partNumber}`;
+    const response = await fetchWithFallback(path);
+
+    const buffer = await response.arrayBuffer();
+
+    return buffer;
+}
+
+async function mergeFiles() {
+    const buffers = [];
+
+    for (let i = 1; i <= parts; i++) {
+        console.log(`Downloading resources.zip part ${i}/${parts}`);
+
+        const buffer = await downloadPart(i);
+        buffers.push(buffer);
+
+        updateProgress("download", (i / parts) * 100);
+    }
+
+    const mergedBlob = new Blob(buffers, {
+        type: "application/zip"
+    });
+
+    return makeBlobUrl(mergedBlob);
 }
 
 async function extract() {
-  const res = await fetch("resources.zip");
+    if (!window.JSZip) {
+        throw new Error("JSZip is not available.");
+    }
 
-  const contentLength = res.headers.get("Content-Length");
-  const total = parseInt(contentLength, 10);
-  const reader = res.body.getReader();
-  let loaded = 0;
-  const chunks = [];
+    const response = await originalFetch(window.mergedResourcesUrl);
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.length;
-    updateProgress('download', Math.floor((loaded / total) * 100));
-  }
+    if (!response.ok) {
+        throw new Error("Could not read the merged resources ZIP.");
+    }
 
-  const arrayBuffer = await new Blob(chunks).arrayBuffer();
-  const zip = await JSZip.loadAsync(arrayBuffer);
-  const files = Object.keys(zip.files).filter(name => !zip.files[name].dir);
-  const totalFiles = files.length;
+    const arrayBuffer = await response.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
 
-  for (let i = 0; i < totalFiles; i++) {
-    const file = zip.files[files[i]];
-    const blob = await file.async("blob");
-    const url = URL.createObjectURL(blob);
-    map.set(files[i], url);
-    updateProgress('extract', Math.floor(((i + 1) / totalFiles) * 100));
-  }
+    const files = Object.keys(zip.files).filter(
+        name => !zip.files[name].dir
+    );
+
+    const totalFiles = files.length;
+
+    if (!totalFiles) {
+        throw new Error("The resources ZIP contains no files.");
+    }
+
+    for (let i = 0; i < totalFiles; i++) {
+        const filePath = files[i];
+        const file = zip.files[filePath];
+
+        const blob = await file.async("blob");
+        const url = makeBlobUrl(blob);
+
+        // Keep the complete path, as well as a basename fallback.
+        map.set(filePath.replace(/^resources\//, ""), url);
+        map.set(filePath.split("/").pop(), url);
+
+        updateProgress("extract", ((i + 1) / totalFiles) * 100);
+    }
+
+    console.log(`Extracted ${totalFiles} resource files.`);
+}
+
+async function loadRuntime() {
+    let lastError;
+
+    for (const base of cdnBases) {
+        try {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement("script");
+
+                script.src = base + "Runtime.js";
+
+                script.onload = resolve;
+                script.onerror = () => {
+                    script.remove();
+                    reject(new Error("Could not load Runtime.js from " + base));
+                };
+
+                document.head.appendChild(script);
+            });
+
+            return;
+        } catch (error) {
+            lastError = error;
+            console.warn(error);
+        }
+    }
+
+    throw lastError || new Error("Runtime.js could not be loaded.");
 }
 
 async function wedone() {
-  await extract();
-  await intercept();
+    await extract();
+    await intercept();
+    await loadRuntime();
 
-  const script = document.createElement('script');
-  script.src = 'Runtime.js';
-  script.onload = () => {
-    new Runtime("MMFCanvas", runtimecanvas);
-  };
-  document.getElementById('progress-container').style.display = 'none';
-  document.head.appendChild(script);
-}
-
-const originalFetch = window.fetch;
-
-function mergeFiles(fileParts) {
-  return new Promise((resolve, reject) => {
-      let buffers = [];
-      let totalSize = 0;
-      let loadedSize = 0;
-      Promise.all(fileParts.map(part =>
-          fetch(part, { method: 'HEAD' }).then(res => {
-              if (!res.ok) throw new Error("Missing part: " + part);
-              return parseInt(res.headers.get("Content-Length") || "0", 10);
-          })
-      )).then(sizes => {
-          totalSize = sizes.reduce((a, b) => a + b, 0);
-          function fetchPart(index) {
-              if (index >= fileParts.length) {
-                  let mergedBlob = new Blob(buffers);
-                  let mergedFileUrl = URL.createObjectURL(mergedBlob);
-                  resolve(mergedFileUrl);
-                  return;
-              }
-
-              fetch(fileParts[index]).then((response) => {
-                  if (!response.ok) throw new Error("Missing part: " + fileParts[index]);
-                  return response.arrayBuffer();
-              }).then((data) => {
-                  buffers.push(data);
-                  loadedSize += data.byteLength;
-                  updateProgress('download', Math.floor((loadedSize / totalSize) * 100));
-                  fetchPart(index + 1);
-              }).catch(reject);
-          }
-
-          fetchPart(0);
-      }).catch(reject);
-  });
-}
-
-function getParts(file, start, end) {
-    let parts = [];
-    for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
+    if (typeof Runtime !== "function") {
+        throw new Error("Runtime.js loaded, but Runtime is unavailable.");
     }
-    return parts;
+
+    document.getElementById("progress-container").style.display = "none";
+
+    new Runtime("MMFCanvas", runtimecanvas);
 }
-Promise.all([
-    mergeFiles(getParts("resources.zip", 1, parts))
-]).then(([resources]) => {
-    window.fetch = async function (url, ...args) {
-        if (url.endsWith("resources.zip")) {
-            return originalFetch(resources, ...args);
-        } else {
-            return originalFetch(url, ...args);
-        }
-    };
-    wedone();
+
+async function startGame() {
+    try {
+        window.mergedResourcesUrl = await mergeFiles();
+        await wedone();
+    } catch (error) {
+        showError(error);
+    }
+}
+
+window.addEventListener("pagehide", () => {
+    for (const url of blobUrls) {
+        URL.revokeObjectURL(url);
+    }
 });
+
+startGame();

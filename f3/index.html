@@ -1,32 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<base href="https://cdn.jsdelivr.net/gh/arcade-v/clickteam/f3/">
-    <link rel="stylesheet" type="text/css" href="style.css"/>
-    <link rel="icon" type="image/x-icon" href="favicon.ico" />
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <meta name="viewport" content="initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, target-densitydpi=device-dpi" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-    <meta name="HandheldFriendly" content="true" />
-    <title>Five Nights at Freddy's 3</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap"
+    rel="stylesheet"
+  >
+    <base href="https://cdn.jsdelivr.net/gh/arcade-v/clickteam/f3/">
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="HandheldFriendly" content="true">
+    <link id="game-style" rel="stylesheet" href="style.css">
+    <link id="game-icon" rel="icon" type="image/x-icon" href="favicon.ico">
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+        }
+
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #game-wrapper {
+            width: 100% !important;
+            height: 100% !important;
+            aspect-ratio: 16 / 9;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #MMFCanvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            aspect-ratio: 16 / 9;
+            border: 0;
+            outline: none;
+            touch-action: none;
+        }
+
+        #progress-container {
+            position: absolute;
+            z-index: 10;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: min(80%, 420px);
+            color: white;
+            font-family: 'Pixelify Sans', monospace !important;
+            font-size: 14px;
+        }
+
+        #loading-error {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: min(85%, 500px);
+            padding: 16px;
+            box-sizing: border-box;
+            color: white;
+            background: #251010;
+            border: 1px solid #a33;
+            border-radius: 8px;
+            font-family: 'Pixelify Sans', monospace !important;
+            overflow-wrap: anywhere;
+        }
+    </style>
 </head>
 
 <body>
-    <div style="display: inline-block; -webkit-user-select: none; text-align: left">
-        <canvas id="MMFCanvas" width="1280" height="720"> Your browser does not support Canvas, Please try again. </canvas>
-    </div>
-    <div id="progress-container">
-        <div style="margin-bottom: 6px;">Downloading... <span id="download-text">0%</span></div>
-        <div style="width: 100%; background: #444; border-radius: 6px; overflow: hidden;">
-            <div id="download-bar" style="height: 10px; background: #3b82f6; width: 0%; transition: width 0.2s;"></div>
+    <div id="game-wrapper">
+        <canvas id="MMFCanvas" width="1280" height="720">
+            Your browser does not support Canvas.
+        </canvas>
+
+        <div id="progress-container">
+            <div style="margin-bottom:6px">
+                Downloading... <span id="download-text">0%</span>
+            </div>
+            <div style="width:100%;background:#444;border-radius:6px;overflow:hidden">
+                <div id="download-bar" style="height:10px;background:#3b82f6;width:0%;transition:width .2s"></div>
+            </div>
+
+            <div style="margin:12px 0 6px">
+                Extracting... <span id="extract-text">0%</span>
+            </div>
+            <div style="width:100%;background:#444;border-radius:6px;overflow:hidden">
+                <div id="extract-bar" style="height:10px;background:#10b981;width:0%;transition:width .2s"></div>
+            </div>
         </div>
-        <div style="margin: 12px 0 6px;">Extracting... <span id="extract-text">0%</span></div>
-        <div style="width: 100%; background: #444; border-radius: 6px; overflow: hidden;">
-            <div id="extract-bar" style="height: 10px; background: #10b981; width: 0%; transition: width 0.2s;"></div>
-        </div>
     </div>
+
+    <div id="loading-error"></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="main.js"></script>
+
+    <script>
+        const cdnBases = [
+            "https://cdn.jsdelivr.net/gh/arcade-v/clickteam/f3/",
+            "https://fastly.jsdelivr.net/gh/arcade-v/clickteam/f3/",
+            "https://testingcf.jsdelivr.net/gh/arcade-v/clickteam/f3/",
+            "https://gcore.jsdelivr.net/gh/arcade-v/clickteam/f3/",
+            "https://raw.githack.com/arcade-v/clickteam/main/f3/",
+            "https://raw.githubusercontent.com/arcade-v/clickteam/main/f3/",
+            "https://cdn.statically.io/gh/arcade-v/clickteam/f3/"
+        ];
+
+        function loadFallbackAsset(elementId, path, attribute) {
+            const element = document.getElementById(elementId);
+            let index = 0;
+
+            element.onerror = function () {
+                index++;
+
+                if (index >= cdnBases.length) {
+                    console.error("Could not load:", path);
+                    return;
+                }
+
+                element[attribute] = cdnBases[index] + path;
+            };
+
+            element[attribute] = cdnBases[0] + path;
+        }
+
+        loadFallbackAsset("game-style", "style.css", "href");
+        loadFallbackAsset("game-icon", "favicon.ico", "href");
+
+        function loadMainScript(index = 0) {
+            if (index >= cdnBases.length) {
+                showLoadingError("Could not load main.js from any CDN.");
+                return;
+            }
+
+            const script = document.createElement("script");
+            script.src = cdnBases[index] + "main.js";
+
+            script.onerror = function () {
+                script.remove();
+                loadMainScript(index + 1);
+            };
+
+            document.body.appendChild(script);
+        }
+
+        function showLoadingError(message) {
+            const error = document.getElementById("loading-error");
+            error.textContent = message;
+            error.style.display = "block";
+        }
+
+        if (window.JSZip) {
+            loadMainScript();
+        } else {
+            const zipScript = document.createElement("script");
+            zipScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+
+            zipScript.onload = loadMainScript;
+            zipScript.onerror = function () {
+                showLoadingError("Could not load JSZip.");
+            };
+
+            document.head.appendChild(zipScript);
+        }
+    </script>
 </body>
 </html>
